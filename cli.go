@@ -2,9 +2,9 @@ package headscale
 
 import (
 	"errors"
-	"log"
 
-	"tailscale.com/wgengine/wgcfg"
+	"gorm.io/gorm"
+	"tailscale.com/types/wgkey"
 )
 
 // RegisterMachine is executed from the CLI to register a new Machine using its MachineKey
@@ -13,18 +13,13 @@ func (h *Headscale) RegisterMachine(key string, namespace string) (*Machine, err
 	if err != nil {
 		return nil, err
 	}
-	mKey, err := wgcfg.ParseHexKey(key)
+	mKey, err := wgkey.ParseHex(key)
 	if err != nil {
 		return nil, err
 	}
-	db, err := h.db()
-	if err != nil {
-		log.Printf("Cannot open DB: %s", err)
-		return nil, err
-	}
-	defer db.Close()
+
 	m := Machine{}
-	if db.First(&m, "machine_key = ?", mKey.HexString()).RecordNotFound() {
+	if result := h.db.First(&m, "machine_key = ?", mKey.HexString()); errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, errors.New("Machine not found")
 	}
 
@@ -40,6 +35,6 @@ func (h *Headscale) RegisterMachine(key string, namespace string) (*Machine, err
 	m.NamespaceID = ns.ID
 	m.Registered = true
 	m.RegisterMethod = "cli"
-	db.Save(&m)
+	h.db.Save(&m)
 	return &m, nil
 }

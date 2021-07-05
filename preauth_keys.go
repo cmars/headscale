@@ -3,8 +3,10 @@ package headscale
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"log"
+	"errors"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 const errorAuthKeyNotFound = Error("AuthKey not found")
@@ -31,13 +33,6 @@ func (h *Headscale) CreatePreAuthKey(namespaceName string, reusable bool, epheme
 		return nil, err
 	}
 
-	db, err := h.db()
-	if err != nil {
-		log.Printf("Cannot open DB: %s", err)
-		return nil, err
-	}
-	defer db.Close()
-
 	now := time.Now().UTC()
 	kstr, err := h.generateKey()
 	if err != nil {
@@ -53,7 +48,7 @@ func (h *Headscale) CreatePreAuthKey(namespaceName string, reusable bool, epheme
 		CreatedAt:   &now,
 		Expiration:  expiration,
 	}
-	db.Save(&k)
+	h.db.Save(&k)
 
 	return &k, nil
 }
@@ -64,15 +59,9 @@ func (h *Headscale) GetPreAuthKeys(namespaceName string) (*[]PreAuthKey, error) 
 	if err != nil {
 		return nil, err
 	}
-	db, err := h.db()
-	if err != nil {
-		log.Printf("Cannot open DB: %s", err)
-		return nil, err
-	}
-	defer db.Close()
 
 	keys := []PreAuthKey{}
-	if err := db.Preload("Namespace").Where(&PreAuthKey{NamespaceID: n.ID}).Find(&keys).Error; err != nil {
+	if err := h.db.Preload("Namespace").Where(&PreAuthKey{NamespaceID: n.ID}).Find(&keys).Error; err != nil {
 		return nil, err
 	}
 	return &keys, nil
@@ -81,14 +70,8 @@ func (h *Headscale) GetPreAuthKeys(namespaceName string) (*[]PreAuthKey, error) 
 // checkKeyValidity does the heavy lifting for validation of the PreAuthKey coming from a node
 // If returns no error and a PreAuthKey, it can be used
 func (h *Headscale) checkKeyValidity(k string) (*PreAuthKey, error) {
-	db, err := h.db()
-	if err != nil {
-		return nil, err
-	}
-	defer db.Close()
-
 	pak := PreAuthKey{}
-	if db.Preload("Namespace").First(&pak, "key = ?", k).RecordNotFound() {
+	if result := h.db.Preload("Namespace").First(&pak, "key = ?", k); errors.Is(result.Error, gorm.ErrRecordNotFound) {
 		return nil, errorAuthKeyNotFound
 	}
 
@@ -101,7 +84,7 @@ func (h *Headscale) checkKeyValidity(k string) (*PreAuthKey, error) {
 	}
 
 	machines := []Machine{}
-	if err := db.Preload("AuthKey").Where(&Machine{AuthKeyID: uint(pak.ID)}).Find(&machines).Error; err != nil {
+	if err := h.db.Preload("AuthKey").Where(&Machine{AuthKeyID: uint(pak.ID)}).Find(&machines).Error; err != nil {
 		return nil, err
 	}
 

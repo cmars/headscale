@@ -5,8 +5,6 @@ import (
 	"os"
 	"testing"
 
-	_ "github.com/jinzhu/gorm/dialects/sqlite" // sql driver
-
 	"gopkg.in/check.v1"
 )
 
@@ -49,4 +47,9 @@ func (s *Suite) ResetDB(c *check.C) {
 	if err != nil {
 		c.Fatal(err)
 	}
+	db, err := h.openDB()
+	if err != nil {
+		c.Fatal(err)
+	}
+	h.db = db
 }

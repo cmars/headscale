@@ -12,8 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/acme/autocert"
+	"gorm.io/gorm"
 	"tailscale.com/tailcfg"
-	"tailscale.com/wgengine/wgcfg"
+	"tailscale.com/types/wgkey"
 )
 
 // Config contains the initial Headscale configuration
@@ -43,11 +44,12 @@ type Config struct {
 // Headscale represents the base app of the service
 type Headscale struct {
 	cfg        Config
+	db         *gorm.DB
 	dbString   string
 	dbType     string
 	dbDebug    bool
-	publicKey  *wgcfg.Key
-	privateKey *wgcfg.PrivateKey
+	publicKey  *wgkey.Key
+	privateKey *wgkey.Private
 
 	pollMu         sync.Mutex
 	clientsPolling map[uint64]chan []byte // this is by all means a hackity hack
@@ -59,7 +61,7 @@ func NewHeadscale(cfg Config) (*Headscale, error) {
 	if err != nil {
 		return nil, err
 	}
-	privKey, err := wgcfg.ParsePrivateKey(string(content))
+	privKey, err := wgkey.ParsePrivate(string(content))
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +89,7 @@ func NewHeadscale(cfg Config) (*Headscale, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	h.clientsPolling = make(map[uint64]chan []byte)
 	return &h, nil
 }
@@ -107,13 +110,6 @@ func (h *Headscale) ExpireEphemeralNodes(milliSeconds int64) {
 }
 
 func (h *Headscale) expireEphemeralNodesWorker() {
-	db, err := h.db()
-	if err != nil {
-		log.Printf("Cannot open DB: %s", err)
-		return
-	}
-	defer db.Close()
-
 	namespaces, err := h.ListNamespaces()
 	if err != nil {
 		log.Printf("Error listing namespaces: %s", err)
@@ -128,7 +124,7 @@ func (h *Headscale) expireEphemeralNodesWorker() {
 		for _, m := range *machines {
 			if m.AuthKey != nil && m.LastSeen != nil && m.AuthKey.Ephemeral && time.Now().After(m.LastSeen.Add(h.cfg.EphemeralNodeInactivityTimeout)) {
 				log.Printf("[%s] Ephemeral client removed from database\n", m.Name)
-				err = db.Unscoped().Delete(m).Error
+				err = h.db.Unscoped().Delete(m).Error
 				if err != nil {
 					log.Printf("[%s] 🤮 Cannot delete ephemeral machine from the database: %s", m.Name, err)
 				}
